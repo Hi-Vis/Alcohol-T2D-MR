@@ -1,0 +1,300 @@
+---
+title: "SNP selection and 2-sample MR"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+
+
+```{r}
+library(tidyverse) 
+library(MendelianRandomization)
+library(TwoSampleMR)
+```
+
+#1.SNP SELECTION
+
+reducing mfi files from UKB to the 93 SNPs from Liu GSCAN (use these to look at MAF scores and imputation info scores)
+```{r}
+Liu<-read.csv("Liu_small_proper.csv")
+Liu_split<-split(Liu, Liu$Chr)
+Liu_split_2 <- lapply(Liu_split,function (Liu){ 
+  bigSNPr_ids <- Liu$rsID
+  }
+) 
+
+MFI_1<-read.delim("ukb22828_c1_b0_v3.mfi.txt",header=F)
+MFI_1_F<-MFI_1 %>% filter(V2 %in% Liu_split_2[["1"]])
+
+MFI_2<-read.delim("ukb22828_c2_b0_v3.mfi.txt",header=F)
+MFI_2_F<-MFI_2 %>% filter(V2 %in% Liu_split_2[["2"]])
+
+MFI_3<-read.delim("ukb22828_c3_b0_v3.mfi.txt",header=F)
+MFI_3_F<-MFI_3 %>% filter(V2 %in% Liu_split_2[["3"]])
+
+MFI_4<-read.delim("ukb22828_c4_b0_v3.mfi.txt",header=F)
+MFI_4_F<-MFI_4 %>% filter(V2 %in% Liu_split_2[["4"]])
+
+MFI_5<-read.delim("ukb22828_c5_b0_v3.mfi.txt",header=F)
+MFI_5_F<-MFI_5 %>% filter(V2 %in% Liu_split_2[["5"]])
+
+MFI_6<-read.delim("ukb22828_c6_b0_v3.mfi.txt",header=F)
+MFI_6_F<-MFI_6 %>% filter(V2 %in% Liu_split_2[["6"]]) #no data - remember there were none from c6 in Liu
+
+MFI_7<-read.delim("ukb22828_c7_b0_v3.mfi.txt",header=F)
+MFI_7_F<-MFI_7 %>% filter(V2 %in% Liu_split_2[["7"]])
+
+MFI_8<-read.delim("ukb22828_c8_b0_v3.mfi.txt",header=F)
+MFI_8_F<-MFI_8 %>% filter(V2 %in% Liu_split_2[["8"]])
+
+MFI_9<-read.delim("ukb22828_c9_b0_v3.mfi.txt",header=F)
+MFI_9_F<-MFI_9 %>% filter(V2 %in% Liu_split_2[["9"]])
+
+MFI_10<-read.delim("ukb22828_c10_b0_v3.mfi.txt",header=F)
+MFI_10_F<-MFI_10 %>% filter(V2 %in% Liu_split_2[["10"]])
+
+MFI_11<-read.delim("ukb22828_c11_b0_v3.mfi.txt",header=F)
+MFI_11_F<-MFI_11 %>% filter(V2 %in% Liu_split_2[["11"]])
+
+MFI_12<-read.delim("ukb22828_c12_b0_v3.mfi.txt",header=F)
+MFI_12_F<-MFI_12 %>% filter(V2 %in% Liu_split_2[["12"]])
+
+MFI_13<-read.delim("ukb22828_c13_b0_v3.mfi.txt",header=F)
+MFI_13_F<-MFI_13%>% filter(V2 %in% Liu_split_2[["13"]])
+
+MFI_14<-read.delim("ukb22828_c14_b0_v3.mfi.txt",header=F)
+MFI_14_F<-MFI_14 %>% filter(V2 %in% Liu_split_2[["14"]])
+
+MFI_15<-read.delim("ukb22828_c15_b0_v3.mfi.txt",header=F)
+MFI_15_F<-MFI_15%>% filter(V2 %in% Liu_split_2[["15"]])
+
+MFI_16<-read.delim("ukb22828_c16_b0_v3.mfi.txt",header=F)
+MFI_16_F<-MFI_16 %>% filter(V2 %in% Liu_split_2[["16"]])
+
+MFI_17<-read.delim("ukb22828_c17_b0_v3.mfi.txt",header=F)
+MFI_17_F<-MFI_17%>% filter(V2 %in% Liu_split_2[["17"]])
+
+MFI_18<-read.delim("ukb22828_c18_b0_v3.mfi.txt",header=F)
+MFI_18_F<-MFI_18%>% filter(V2 %in% Liu_split_2[["18"]])
+
+MFI_19<-read.delim("ukb22828_c19_b0_v3.mfi.txt",header=F)
+MFI_19_F<-MFI_19 %>% filter(V2 %in% Liu_split_2[["19"]])
+
+MFI_20<-read.delim("ukb22828_c20_b0_v3.mfi.txt",header=F)
+MFI_20_F<-MFI_20%>% filter(V2 %in% Liu_split_2[["20"]])
+
+MFI_22<-read.delim("ukb22828_c22_b0_v3.mfi.txt",header=F)
+MFI_22_F<-MFI_22 %>% filter(V2 %in% Liu_split_2[["22"]])
+
+
+```
+
+
+
+linkage disequilibrium 
+```{r}
+Liu_orig<-read.csv("Liu_99_forimport.csv",header=T)
+Liu_orig<-Liu_orig %>% mutate(eaf=1-Alternate.Allele.Frequency)
+Liu_orig<-Liu_orig[1:99,]
+Liu_orig<-Liu_orig %>% mutate(Pvalue=as.numeric(Pvalue)) #had a problem with rs1229984 because has a less than symbol
+Liu_orig<-Liu_orig %>% mutate(Pvalue=case_when(rsID=="rs1229984"~2.2e-308, TRUE~Pvalue) )
+
+Liu_LD_check<-format_data(
+  Liu_orig,
+  type="exposure",
+  header = TRUE,
+  #phenotype_col="ï..Phenotype",
+  pval_col = "Pvalue",
+    snp_col = "rsID",
+    beta_col="Beta",
+    se_col="SE",
+    eaf_col="eaf",
+    effect_allele_col = "Reference.Allele",
+    other_allele_col = "Alternate.Allele",
+  chr_col="Chr",
+  pos_col="ï..Locus")
+
+
+
+clumped_Liu<-clump_data(Liu_LD_check,  clump_r2 = 0.01) 
+#remove the LD SNPs from Liu_LD_check
+Liu_after_LD<-Liu_LD_check %>% filter(!(SNP=="rs2178197"|SNP=="rs1004787"|SNP=="rs74664784"|SNP=="rs60654199"|SNP=="rs7682824"|SNP=="rs35538052"|SNP=="rs12499107"|SNP=="rs144198753"|SNP=="rs1154414"|SNP=="rs10028756"|SNP=="rs561222871"|SNP=="rs17029090"|SNP=="rs10004020"|SNP=="rs10085696"))
+
+
+```
+
+no SNPs have MAF<.01
+remove those 2 palindromic SNPs with MAF>.42 for two-sample instrument
+
+```{r}
+Liu_justMAF<-Liu_orig %>% select(rsID, Minor.Allele.Frequency)
+Liu_justMAF<-Liu_justMAF %>% mutate(SNP=rsID)
+Liu_LD_check_2<-full_join(Liu_LD_check,Liu_justMAF, by="SNP")
+
+Liu_afterLD<-Liu_LD_check_2 %>% filter(SNP %in% Liu_after_LD$SNP)
+
+Liu_afterMAF<-Liu_afterLD %>% filter(Minor.Allele.Frequency>.01) #none removed
+
+
+Liu_palindrom<-Liu_afterMAF %>% filter(!((
+                            (effect_allele.exposure=="A"&other_allele.exposure=="T")|
+                              (effect_allele.exposure=="T"&other_allele.exposure=="A")|
+                                          (effect_allele.exposure=="C"&other_allele.exposure=="G")|
+                                          (effect_allele.exposure=="G"&other_allele.exposure=="C")
+                            ) &Minor.Allele.Frequency>.42))
+diffs <- setdiff(Liu_afterMAF$SNP,Liu_palindrom$SNP)
+```
+
+Using phensocanner to check for associations with confounders.
+run over the version without palindromic snps removed, so that can apply it to the 1 sampl list too (so if the SNPs assoc with traits include the palindromic ones ("rs12651313" "rs1104608" ) then not applicable for the 1 sample as will be removed anyway, and if they include the 1 from UKB with MAF<.01 (rs561222871) then not applicable for exclusion for 2 sample a will be removed anyway ) 
+```{r}
+#first remove SNP without an Rsid
+Liu_after_pal_removefullstoprsid<-Liu_afterMAF %>% filter(SNP!=".")
+SNP_list<-Liu_after_pal_removefullstoprsid[1:84,3]
+
+res<-phenoscanner(SNP_list, pvalue=5E-8,proxies="EUR") 
+Euro_res<-res$results %>% filter(ancestry=="European")
+Euro_res_small<-Euro_res %>% filter(trait=="Ever smoked"|trait== "Pack years adult smoking as proportion of life span exposed to smoking"|trait== "Pack years of smoking preview only"|trait== "Number of days or week walked 10+ minutes"|trait== "Qualifications: A levels or as levels or equivalent"|trait== "Qualifications: college or university degree|trait== Qualifications: none"|trait== "Years of educational attainment"|trait== "Past tobacco smoking"|trait== "Smoking status: previous"|trait== "Types of physical activity in last 4 weeks: other exercises"|trait== "Extreme obesity with early age of onset"|trait== "Types of physical activity in last 4 weeks: strenuous sports"|trait== "Nicotine dependence smoking ever smokers versus never smokers"|trait== "Smoking behavior"|trait== "Smoking")
+
+unique(Euro_res_small$snp) 
+```
+
+final 2 sample SNP list
+```{r}
+
+`%notin%` <- Negate(`%in%`)
+Liu_after_pal_removefullstoprsid<-Liu_palindrom %>% filter(SNP!=".")
+Liu_finalSNPs<-Liu_after_pal_removefullstoprsid %>% filter(SNP %notin% c('rs13383034','rs13024996','rs62250685','rs13107325','rs11030084')) 
+
+```
+
+final 1 sample SNP list
+```{r}
+Liu_after_pal_removefullstoprsid<-Liu_afterMAF %>% filter(SNP!=".")
+Liu_finalSNPs1SAMP<-Liu_after_pal_removefullstoprsid %>% filter(SNP %notin% c('rs13383034','rs13024996','rs62250685','rs13107325','rs11030084'))
+saveRDS(Liu_finalSNPs1SAMP, file="Liu_finalSNPs1SAMP.Rda")
+```
+
+
+
+#2. TWO-SAMPLE MR
+
+```{r eval=TRUE}
+
+Liu_finalSNPs<-Liu_finalSNPs %>% mutate(exposure="drinks_per_week")
+
+
+
+#outcome data
+
+#diabetes
+#https://gwas.mrcieu.ac.uk/datasets/ebi-a-GCST006867/
+ao <- available_outcomes()
+ao[grepl("Type 2 diabetes", ao$trait), ] #the one we want is ebi-a-GCST006867 (matches up to Xue entry)
+t2d_out_dat <- extract_outcome_data(
+snps = Liu_finalSNPs$SNP,
+	outcomes = 'ebi-a-GCST006867', rsq=.95, maf_threshold = .42
+) 
+
+#hba1c
+#https://gwas.mrcieu.ac.uk/datasets/ebi-a-GCST90002244/
+hba1c_out_dat <- extract_outcome_data(
+	snps = Liu_finalSNPs$SNP,
+	outcomes = 'ebi-a-GCST90002244', rsq=.95, maf_threshold = .42
+) 
+
+combined_out_dat<-rbind(t2d_out_dat,hba1c_out_dat)
+
+#exposure data
+Liu_reduced = read.table(gzfile("DrinksPerWeek.WithoutUKB.txt.gz"),sep="\t")
+
+
+Liu_reduced<-Liu_reduced %>% janitor::row_to_names(row_number=1)
+Liu_reduced<-Liu_reduced %>% mutate(PVALUE=as.numeric(PVALUE)) %>% mutate(BETA=as.numeric(BETA)) %>% mutate(SE=as.numeric(SE))
+
+
+SNPS_77<-Liu_finalSNPs$SNP
+Liu_reduced_matching_77SNPS<-Liu_reduced %>% filter(RSID %in% SNPS_77)
+
+```
+
+
+
+```{r}
+Liu_reduced_matching_77SNPS<-Liu_reduced_matching_77SNPS %>% mutate(AF=as.numeric(AF))
+Liu_reduced_matching_77SNPS<-Liu_reduced_matching_77SNPS %>% mutate(eaf=1-AF)
+
+Liu_reduced_exposure <- format_data(Liu_reduced_matching_77SNPS, type="exposure", chr_col             ="CHROM", pos_col ="POS", snp_col = "RSID", effect_allele_col = "REF", other_allele_col="ALT", beta_col = "BETA", se_col = "SE",  eaf_col="eaf", pval_col = "PVALUE")
+Liu_reduced_exposure<-Liu_reduced_exposure %>% mutate(exposure="drinks_per_week")
+
+#next step is strand harmonisation
+dat_sensitivity<-harmonise_data(exposure_dat=Liu_reduced_exposure, outcome_dat=combined_out_dat) 
+```
+
+performing MR
+```{r}
+mr_method_list()
+res_sensitivity<-mr(dat_sensitivity, method_list = c("mr_ivw", "mr_egger_regression", "mr_weighted_median"))
+
+dat_sensitivity_T2D<-dat_sensitivity[1:57,] 
+dat_sensitivity_hba1c<-dat_sensitivity[58:134,] 
+res_rapsT2D_sensitivity<-mr.raps::mr.raps(dat_sensitivity_T2D$beta.exposure, dat_sensitivity_T2D$beta.outcome,dat_sensitivity_T2D$se.exposure,dat_sensitivity_T2D$se.outcome, diagnosis=TRUE) 
+res_rapshba1c_sensitivity<-mr.raps::mr.raps(dat_sensitivity_hba1c$beta.exposure, dat_sensitivity_hba1c$beta.outcome,dat_sensitivity_hba1c$se.exposure,dat_sensitivity_hba1c$se.outcome, diagnosis=TRUE)
+
+#now MR RAPS
+raps_T2D_results_sensitivity<-c("BfF9t0","ebi-a-GCST006867","Type 2 diabetes || id:ebi-a-GCST006867","drinks_per_week", "MR Raps", "56", res_rapsT2D_sensitivity[["beta.hat"]], res_rapsT2D_sensitivity[["beta.se"]], res_rapsT2D_sensitivity[["beta.p.value"]])
+
+raps_hba1c_results_sensitivity<-c("BfF9t0","ebi-a-GCST90002244","Glycated hemoglobin levels || id:ebi-a-GCST90002244","drinks_per_week", "MR Raps", "76", res_rapshba1c_sensitivity[["beta.hat"]], res_rapshba1c_sensitivity[["beta.se"]], res_rapshba1c_sensitivity[["beta.p.value"]])
+
+res2_sensitivity<-rbind (res_sensitivity,raps_T2D_results_sensitivity,raps_hba1c_results_sensitivity)
+res2_sensitivity<-res2_sensitivity %>% mutate(b=as.numeric(b)) %>% mutate(se=as.numeric(se))
+
+#NOW MR PRESSO
+res_presso_wrapper_sensitivity<-run_mr_presso(dat_sensitivity, NbDistribution = 2500, SignifThreshold = 0.05)
+
+presso_T2D_results_sensitivity<-c("BfF9t0","ebi-a-GCST006867","Type 2 diabetes || id:ebi-a-GCST006867","drinks_per_week", "MR PRESSO", "56", res_presso_wrapper_sensitivity[[1]][["Main MR results"]][["Causal Estimate"]][[2]], res_presso_wrapper_sensitivity[[1]][["Main MR results"]][["Sd"]][[2]], res_presso_wrapper_sensitivity[[1]][["Main MR results"]][["P-value"]][[2]])
+
+presso_hba1c_results_sensitivity<-c("BfF9t0","ebi-a-GCST90002244","Glycated hemoglobin levels || id:ebi-a-GCST90002244","drinks_per_week", "MR PRESSO", "76", res_presso_wrapper_sensitivity[[2]][["Main MR results"]][["Causal Estimate"]][[2]], res_presso_wrapper_sensitivity[[2]][["Main MR results"]][["Sd"]][[2]], res_presso_wrapper_sensitivity[[2]][["Main MR results"]][["P-value"]][[2]])
+
+res2_sensitivity<-rbind (res2_sensitivity,presso_T2D_results_sensitivity,presso_hba1c_results_sensitivity)
+res2_sensitivity<-res2_sensitivity %>% mutate(b=as.numeric(b)) %>% mutate(se=as.numeric(se))
+
+```
+
+```{r}
+mr_heterogeneity(dat_sensitivity) 
+mr_pleiotropy_test(dat_sensitivity) 
+
+```
+
+plotting
+```{r}
+p1_sensitivity <- mr_scatter_plot(res2_sensitivity, dat_sensitivity) 
+
+p1_sensitivity[[1]]
+p1_sensitivity[[2]]
+
+```
+
+
+adding weighted mode results
+```{r}
+res_Wmode<-mr(dat_sensitivity, method_list = c("mr_weighted_mode"))
+
+res2_sensitivity<-rbind(res2_sensitivity,res_Wmode)
+
+```
+
+cleaning up results
+```{r}
+#ORs for diabetes outcome
+res2_T2D_sensitivity<-res2_sensitivity %>% filter(outcome=="Type 2 diabetes || id:ebi-a-GCST006867")
+res2_hba1c_sensitivity<-res2_sensitivity %>% filter(outcome=="Glycated hemoglobin levels || id:ebi-a-GCST90002244")
+
+res2_T2D_sensitivity<-generate_odds_ratios(res2_T2D_sensitivity)
+```
+
+
+
