@@ -10,9 +10,10 @@ output: html_document
 library(tidyverse)
 library(SUMnlmr)
 library(survival)
-#devtools::install_github("harrelfe/rms")
-install.packages("rms")
 library(rms)
+library(metafor)
+library(stats)
+library(matrixStats)
 
 COX_update79<-readRDS("COX_update79.rds") #data prepared for survival analysis
 update_pp679<-readRDS("update_pp679.rds") #data prepared for baseline prevalent analysis
@@ -20,7 +21,7 @@ update_pp679<-readRDS("update_pp679.rds") #data prepared for baseline prevalent 
 ```
 
 
-Baseline prevalent cases analysis
+Baseline prevalent cases NLMR
 ```{r}
   update_pp679<-update_pp679 %>% dplyr::mutate(Sex_F=as.factor(Sex))
   update_pp679 <-update_pp679 %>% mutate(array_type=case_when(grepl("UKBiLEVEAX", Genotype.measurement.batch)~"UKBiLEVEAX", TRUE ~"Affy"))
@@ -43,6 +44,7 @@ model_FULL_T2D<- with(summ_covar_FULL_T2D$summary, frac_poly_summ_mr(bx=bx,
                   fig=TRUE)
 )
 summary(model_FULL_T2D)
+
 model_FULL_T2D <-with(summ_covar_FULL_T2D$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
                   ci="bootstrap_se",
                   nboot=1000, 
@@ -52,7 +54,7 @@ model_FULL_T2D <-with(summ_covar_FULL_T2D$summary, piecewise_summ_mr(by, bx, bys
 )
 summary(model_FULL_T2D)
 
-#now re-doing above with current drinkers AND NEVER DRINKERS only
+#now re-doing above excluding former drinkers
 df_DR<-update_pp679 %>% filter(BL_drinker_status=="Current"|BL_drinker_status=="Never")
 dummies_2<-model.matrix(~Sex, data=df_DR)[,2] 
   dummies_3<-model.matrix(~array_type, data=df_DR)[,2] 
@@ -80,19 +82,16 @@ model_DR_T2D <-with(summ_covar_DR_T2D$summary, piecewise_summ_mr(by, bx, byse, b
 )
 summary(model_DR_T2D)
 
-#to run above with current drinkers only:
+#to run above using only current drinkers:
 df_DR<-update_pp679 %>% filter(BL_drinker_status=="Current")
 #then re-run above lines
 
 ```
 
 
-now repeat above for hba1c outcome
+Baseline HbA1c NLMR
 ```{r}
 
-sum(is.na(update_pp679$HbA1c_BL_winsor))
-#need to remove everyone who is NA for that var 
-#update_pp679 %>% count(Sex)
 update_pp679<-update_pp679 %>% dplyr::mutate(Sex_F=as.factor(Sex))
   update_pp679 <-update_pp679 %>% mutate(array_type=case_when(grepl("UKBiLEVEAX", Genotype.measurement.batch)~"UKBiLEVEAX", TRUE ~"Affy"))
   full_HbA1c<-update_pp679 %>% filter(!is.na(HbA1c_BL_winsor))
@@ -112,15 +111,16 @@ summ_covar_FULL_HB<-create_nlmr_summary(y = full_HbA1c$HbA1c_BL_winsor,
                                covar=cbind(dummies_2,dummies_3,matrix(data=c(full_HbA1c$Age.at.recruitment, full_HbA1c$Genetic.principal.components...Array.1,full_HbA1c$Genetic.principal.components...Array.2,full_HbA1c$Genetic.principal.components...Array.3,full_HbA1c$Genetic.principal.components...Array.4,full_HbA1c$Genetic.principal.components...Array.5,full_HbA1c$Genetic.principal.components...Array.6,full_HbA1c$Genetic.principal.components...Array.7,full_HbA1c$Genetic.principal.components...Array.8,full_HbA1c$Genetic.principal.components...Array.9,full_HbA1c$Genetic.principal.components...Array.10),ncol=11)),
                                  family = "gaussian",
                                  q = 10, strata_method="ranked", controlsonly = FALSE)
-#MUST REMEMBER TO LOAD METAFOR LIBRARY BEFORE RUN MY VERSION OF THE FUNCTION!
-#rather than having to remake function, simply override pref_y below
+
+
 #also need to add ref values based on mean of lowest category for the fp (1.33), and min (0) for the piecewise
-model_FULL_HB<- with(summ_covar_FULL_HB$summary, frac_poly_summ_mrRV(bx=bx,
+model_FULL_HB<- with(summ_covar_FULL_HB$summary, frac_poly_summ(bx=bx,
                   by=by, 
                   bxse=bxse, 
                   byse=byse, 
                   xmean=xmean,
                   ref=1.33,
+                  pref_x="Drinks per week",
                   pref_y = "Relative HbA1c, mmol/mol",
                   family="gaussian",
                   fig=TRUE,ylim_lower = -2.1, ylim_upper = 0, breaks= c(-2,-1.5,-1,-.5,0))
@@ -129,6 +129,8 @@ model_FULL_HB
 
 summary(model_FULL_HB) 
 sum_test<-summary(model_FULL_HB) 
+
+#to calculate alc almount corresponding to risk nadir etc
 xvals<-model_FULL_HB[["figure"]][["data"]][["x"]]
 yvals<-model_FULL_HB[["figure"]][["data"]][["yest"]]
 uci<-model_FULL_HB[["figure"]][["data"]][["uci"]]
@@ -137,17 +139,20 @@ xyvals<-data.frame(xvals,yvals,uci)
 which.min(xyvals$yvals)
 xyvals[8539,]
 
-model_FULL_HB <-with(summ_covar_FULL_HB$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
+model_FULL_HB <-with(summ_covar_FULL_HB$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
                   ci="bootstrap_se",
                   nboot=1000, 
                   fig=TRUE,
                   family="gaussian",
+                  pref_x = "Drinks per week",
+                                pref_x_ref = "Drinks per week",
                       pref_y = "Relative HbA1c, mmol/mol",
+                  breaks = c(0,1,2,5,10,20,50,100,200,500),
                   ci_fig="ribbon")
 )
 summary(model_FULL_HB)
 
-#now re-dpoing above with current drinkers AND NEVER DRINKERS only
+#now re-doing above without former drinkers
 DR_HbA1c<-full_HbA1c %>% filter(BL_drinker_status=="Never"|BL_drinker_status=="Current")
 #15.05 doing as well for current drinkers only
 DR_HbA1c<-full_HbA1c %>% filter(BL_drinker_status=="Current")
@@ -161,34 +166,38 @@ dummies_2<-model.matrix(~Sex, data=DR_HbA1c)[,2]
                                covar=cbind(dummies_2,dummies_3,matrix(data=c(DR_HbA1c$Age.at.recruitment, DR_HbA1c$Genetic.principal.components...Array.1,DR_HbA1c$Genetic.principal.components...Array.2,DR_HbA1c$Genetic.principal.components...Array.3,DR_HbA1c$Genetic.principal.components...Array.4,DR_HbA1c$Genetic.principal.components...Array.5,DR_HbA1c$Genetic.principal.components...Array.6,DR_HbA1c$Genetic.principal.components...Array.7,DR_HbA1c$Genetic.principal.components...Array.8,DR_HbA1c$Genetic.principal.components...Array.9,DR_HbA1c$Genetic.principal.components...Array.10),ncol=11)),
                                  family = "gaussian",
                                  q = 10, strata_method="ranked", controlsonly = FALSE)
-  #rather than having to remake function, simply override pref_y below
-  model_DR_HB<- with(summ_covar_DR_HB$summary, frac_poly_summ_mrRV(bx=bx,
+
+  model_DR_HB<- with(summ_covar_DR_HB$summary, frac_poly_summ_mr(bx=bx,
                   by=by, 
                   bxse=bxse, 
                   byse=byse, 
                   xmean=xmean,
                   ref=2.85,  #ref=2.85 when current drinkers only
                   family="gaussian",
-                   pref_y = "Relative HbA1c, mmol/mol",
+                   pref_x = "Drinks per week", pref_y = "Relative HbA1c, mmol/mol",
                   fig=TRUE)
 )
 summary(model_DR_HB)
 
 
-model_DR_HB <-with(summ_covar_DR_HB$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
+model_DR_HB <-with(summ_covar_DR_HB$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
                   ci="bootstrap_se",
                   nboot=1000, 
                   fig=TRUE,
                   ref=.47,
                   family="gaussian",
                    pref_y = "Relative HbA1c, mmol/mol",
+                    pref_x = "Drinks per week",
+                                pref_x_ref = "Drinks per week",
+                                breaks = c(0,1,2,5,10,20,50,100,200,500),
                   ci_fig="ribbon")
 )
 summary(model_DR_HB)
 
 
 
-#split further by BMI category
+
+#split females further by BMI category
 full_HbA1c_F<-full_HbA1c_F %>% filter(!is.na(Body.mass.index..BMI....Instance.0.participant...p21001_i0.))
 full_HbA1c_F_N<-full_HbA1c_F %>% filter(Body.mass.index..BMI....Instance.0.participant...p21001_i0.<25) 
 full_HbA1c_F_OV<-full_HbA1c_F %>% filter(Body.mass.index..BMI....Instance.0.participant...p21001_i0.>=25
@@ -212,6 +221,7 @@ full_HbA1c_F_OB<-full_HbA1c_F %>% filter(resid_BMI >= 1.15)
 
 
 #doing the hba1c analysis stratified by sex
+#and also by BMI status: #run the below for each BMI category separately, and separately for both regular BMI and residual BMI methods of categorisation 
 
 
   dummies_3<-model.matrix(~array_type, data=full_HbA1c_M)[,2] 
@@ -224,19 +234,22 @@ summ_covar_F_NULL_HB<-create_nlmr_summary(y = full_HbA1c_M$HbA1c_BL_winsor,
                                  q = 10, strata_method="ranked", controlsonly = FALSE)
 
 
+
+
+#PLOTTING
 #ref should be .755 for women; 2.63 for men 
 #for F N should be 1.08; .853 for OV; .307 for OB
 #using tertiles FN 1.09 FOV .988 F OB should be .42
-model_FULL_HB<- with(summ_covar_F_NULL_HB$summary, frac_poly_summ_mrRV(bx=bx, 
+model_FULL_HB<- with(summ_covar_F_NULL_HB$summary, frac_poly_summ_mr(bx=bx, 
                   by=by, 
                   bxse=bxse, 
                   byse=byse, 
                   ref=2.63,
                   xmean=xmean,
                   family="gaussian",
-                  pref_y = "Relative HbA1c, mmol/mol",
-                  fig=TRUE, ,ylim_lower = -2.1, ylim_upper = 0, breaks= c(-2,-1.5,-1,-.5,0)) 
-) 
+                  pref_x = "Drinks per week",pref_y = "Relative HbA1c, mmol/mol",
+                  fig=TRUE, ylim_lower = -2.1, ylim_upper = 0, breaks= c(-2,-1.5,-1,-.5,0)) 
+                  ) 
 model_FULL_HB
 
 sumMO<- summary(model_FULL_HB) 
@@ -249,213 +262,7 @@ sumMO[["figure"]]+ scale_x_continuous(breaks=seq(0,60,5))
 
 
 
-```{r}
-
-
-  update_pp679<-update_pp679 %>% dplyr::mutate(Sex_F=as.factor(Sex))
-  update_pp679 <-update_pp679 %>% mutate(array_type=case_when(grepl("UKBiLEVEAX", Genotype.measurement.batch)~"UKBiLEVEAX", TRUE ~"Affy"))
-  dummies_2<-model.matrix(~Sex, data=update_pp679 )[,2] 
-  dummies_3<-model.matrix(~array_type, data=update_pp679 )[,2] 
-  
-summ_covar_FULL_T2D<-create_nlmr_summary(y = update_pp679$T2dX_at_BL,
-                                 x = update_pp679$weekly_units_B_R,
-                                 g = update_pp679$GRS_79,
-                               covar=cbind(dummies_2,dummies_3,matrix(data=c(update_pp679$Age.at.recruitment, update_pp679$Genetic.principal.components...Array.1,update_pp679$Genetic.principal.components...Array.2,update_pp679$Genetic.principal.components...Array.3,update_pp679$Genetic.principal.components...Array.4,update_pp679$Genetic.principal.components...Array.5,update_pp679$Genetic.principal.components...Array.6,update_pp679$Genetic.principal.components...Array.7,update_pp679$Genetic.principal.components...Array.8,update_pp679$Genetic.principal.components...Array.9,update_pp679$Genetic.principal.components...Array.10),ncol=11)),
-                                 family = "binomial",
-                                 q = 10, strata_method="ranked", controlsonly = TRUE)
-
-model_FULL_T2D<- with(summ_covar_FULL_T2D$summary, frac_poly_summ_mr(bx=bx,
-                  by=by, 
-                  bxse=bxse, 
-                  byse=byse, 
-                  xmean=xmean,
-                  family="binomial",
-                  fig=TRUE)
-)
-summary(model_FULL_T2D)
-model_FULL_T2D <-with(summ_covar_FULL_T2D$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
-                  ci="bootstrap_se",
-                  nboot=1000, 
-                  fig=TRUE,
-                  family="binomial",
-                  ci_fig="ribbon")
-)
-summary(model_FULL_T2D)
-
-#now re-dpoing above with current drinkers AND NEVER DRINKERS only
-df_DR<-update_pp679 %>% filter(BL_drinker_status=="Current"|BL_drinker_status=="Never")
-dummies_2<-model.matrix(~Sex, data=df_DR)[,2] 
-  dummies_3<-model.matrix(~array_type, data=df_DR)[,2] 
-  summ_covar_DR_T2D<-create_nlmr_summary(y = df_DR$T2dX_at_BL,
-                                 x = df_DR$weekly_units_B_R,
-                                 g = df_DR$GRS_79,
-                               covar=cbind(dummies_2,dummies_3,matrix(data=c(df_DR$Age.at.recruitment, df_DR$Genetic.principal.components...Array.1,df_DR$Genetic.principal.components...Array.2,df_DR$Genetic.principal.components...Array.3,df_DR$Genetic.principal.components...Array.4,df_DR$Genetic.principal.components...Array.5,df_DR$Genetic.principal.components...Array.6,df_DR$Genetic.principal.components...Array.7,df_DR$Genetic.principal.components...Array.8,df_DR$Genetic.principal.components...Array.9,df_DR$Genetic.principal.components...Array.10),ncol=11)),
-                                 family = "binomial",
-                                 q = 10, strata_method="ranked", controlsonly = TRUE)
-  model_DR_T2D<- with(summ_covar_DR_T2D$summary, frac_poly_summ_mr(bx=bx,
-                  by=by, 
-                  bxse=bxse, 
-                  byse=byse, 
-                  xmean=xmean,
-                  family="binomial",
-                  fig=TRUE)
-)
-summary(model_DR_T2D)
-model_DR_T2D <-with(summ_covar_DR_T2D$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
-                  ci="bootstrap_se",
-                  nboot=1000, 
-                  fig=TRUE,
-                  family="binomial",
-                  ci_fig="ribbon")
-)
-summary(model_DR_T2D)
-
-#09.05 Amy comment -> redo above with drinkers only
-
-df_DR<-update_pp679 %>% filter(BL_drinker_status=="Current")
-#then re-run above lines
-
-```
-
-
-
-#now repeat above for our two continuous measures
-#HbA1c_BL_winsor
-```{r}
-
-sum(is.na(update_pp679$HbA1c_BL_winsor))
-#need to remove everyone who is NA for that var 
-#update_pp679 %>% count(Sex)
-update_pp679<-update_pp679 %>% dplyr::mutate(Sex_F=as.factor(Sex))
-  update_pp679 <-update_pp679 %>% mutate(array_type=case_when(grepl("UKBiLEVEAX", Genotype.measurement.batch)~"UKBiLEVEAX", TRUE ~"Affy"))
-  full_HbA1c<-update_pp679 %>% filter(!is.na(HbA1c_BL_winsor))
-  #women only
-  full_HbA1c_F<-full_HbA1c %>% filter(Sex=="Female")
-  #men only
-   full_HbA1c_M<-full_HbA1c %>% filter(Sex=="Male")
-  
-
-dummies_2<-model.matrix(~Sex, data=full_HbA1c)[,2] 
-  dummies_3<-model.matrix(~array_type, data=full_HbA1c)[,2] 
-  
-
-summ_covar_FULL_HB<-create_nlmr_summary(y = full_HbA1c$HbA1c_BL_winsor,
-                                 x = full_HbA1c$weekly_units_B_R,
-                                 g = full_HbA1c$GRS_79,
-                               covar=cbind(dummies_2,dummies_3,matrix(data=c(full_HbA1c$Age.at.recruitment, full_HbA1c$Genetic.principal.components...Array.1,full_HbA1c$Genetic.principal.components...Array.2,full_HbA1c$Genetic.principal.components...Array.3,full_HbA1c$Genetic.principal.components...Array.4,full_HbA1c$Genetic.principal.components...Array.5,full_HbA1c$Genetic.principal.components...Array.6,full_HbA1c$Genetic.principal.components...Array.7,full_HbA1c$Genetic.principal.components...Array.8,full_HbA1c$Genetic.principal.components...Array.9,full_HbA1c$Genetic.principal.components...Array.10),ncol=11)),
-                                 family = "gaussian",
-                                 q = 10, strata_method="ranked", controlsonly = FALSE)
-#MUST REMEMBER TO LOAD METAFOR LIBRARY BEFORE RUN MY VERSION OF THE FUNCTION!
-#rather than having to remake function, simply override pref_y below
-#also need to add ref values based on mean of lowest category for the fp (1.33), and min (0) for the piecewise
-model_FULL_HB<- with(summ_covar_FULL_HB$summary, frac_poly_summ_mrRV(bx=bx,
-                  by=by, 
-                  bxse=bxse, 
-                  byse=byse, 
-                  xmean=xmean,
-                  ref=1.33,
-                  pref_y = "Relative HbA1C, mmol/mol",
-                  family="gaussian",
-                  fig=TRUE)
-)
-summary(model_FULL_HB) 
-sum_test<-summary(model_FULL_HB) 
-xvals<-model_FULL_HB[["figure"]][["data"]][["x"]]
-yvals<-model_FULL_HB[["figure"]][["data"]][["yest"]]
-uci<-model_FULL_HB[["figure"]][["data"]][["uci"]]
-xyvals<-data.frame(xvals,yvals,uci) 
-#for nadir index
-which.min(xyvals$yvals)
-xyvals[8539,]
-
-model_FULL_HB <-with(summ_covar_FULL_HB$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
-                  ci="bootstrap_se",
-                  nboot=1000, 
-                  fig=TRUE,
-                  family="gaussian",
-                      pref_y = "Relative HbA1C, mmol/mol",
-                  ci_fig="ribbon")
-)
-summary(model_FULL_HB)
-
-#now re-dpoing above with current drinkers AND NEVER DRINKERS only
-DR_HbA1c<-full_HbA1c %>% filter(BL_drinker_status=="Never"|BL_drinker_status=="Current")
-#15.05 doing as well for current drinkers only
-DR_HbA1c<-full_HbA1c %>% filter(BL_drinker_status=="Current")
-
-dummies_2<-model.matrix(~Sex, data=DR_HbA1c)[,2] 
-  dummies_3<-model.matrix(~array_type, data=DR_HbA1c)[,2] 
-
-  summ_covar_DR_HB<-create_nlmr_summary(y = DR_HbA1c$HbA1c_BL_winsor,
-                                 x = DR_HbA1c$weekly_units_B_R,
-                                 g = DR_HbA1c$GRS_79,
-                               covar=cbind(dummies_2,dummies_3,matrix(data=c(DR_HbA1c$Age.at.recruitment, DR_HbA1c$Genetic.principal.components...Array.1,DR_HbA1c$Genetic.principal.components...Array.2,DR_HbA1c$Genetic.principal.components...Array.3,DR_HbA1c$Genetic.principal.components...Array.4,DR_HbA1c$Genetic.principal.components...Array.5,DR_HbA1c$Genetic.principal.components...Array.6,DR_HbA1c$Genetic.principal.components...Array.7,DR_HbA1c$Genetic.principal.components...Array.8,DR_HbA1c$Genetic.principal.components...Array.9,DR_HbA1c$Genetic.principal.components...Array.10),ncol=11)),
-                                 family = "gaussian",
-                                 q = 10, strata_method="ranked", controlsonly = FALSE)
-  #rather than having to remake function, simply override pref_y below
-  model_DR_HB<- with(summ_covar_DR_HB$summary, frac_poly_summ_mrRV(bx=bx,
-                  by=by, 
-                  bxse=bxse, 
-                  byse=byse, 
-                  xmean=xmean,
-                  ref=2.85,  #ref=2.85 when current drinkers only
-                  family="gaussian",
-                   pref_y = "Relative HbA1C, mmol/mol",
-                  fig=TRUE)
-)
-summary(model_DR_HB)
-
-
-model_DR_HB <-with(summ_covar_DR_HB$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
-                  ci="bootstrap_se",
-                  nboot=1000, 
-                  fig=TRUE,
-                  ref=.47,
-                  family="gaussian",
-                   pref_y = "Relative HbA1C, mmol/mol",
-                  ci_fig="ribbon")
-)
-summary(model_DR_HB)
-
-
-
-#24.04 doing the hba1c analysis stratified by sex
-#dummies_2<-model.matrix(~Sex, data=full_HbA1c)[,2] 
-
-  dummies_3<-model.matrix(~array_type, data=full_HbA1c_F)[,2] 
-  
-summ_covar_FULL_HB<-create_nlmr_summary(y = full_HbA1c_F$HbA1c_BL_winsor,
-                                 x = full_HbA1c_F$weekly_units_B_R,
-                                 g = full_HbA1c_F$GRS_79,
-                               covar=cbind(dummies_3,matrix(data=c(full_HbA1c_F$Age.at.recruitment, full_HbA1c_F$Genetic.principal.components...Array.1,full_HbA1c_F$Genetic.principal.components...Array.2,full_HbA1c_F$Genetic.principal.components...Array.3,full_HbA1c_F$Genetic.principal.components...Array.4,full_HbA1c_F$Genetic.principal.components...Array.5,full_HbA1c_F$Genetic.principal.components...Array.6,full_HbA1c_F$Genetic.principal.components...Array.7,full_HbA1c_F$Genetic.principal.components...Array.8,full_HbA1c_F$Genetic.principal.components...Array.9,full_HbA1c_F$Genetic.principal.components...Array.10),ncol=11)),
-                                 family = "gaussian",
-                                 q = 10, strata_method="ranked", controlsonly = FALSE)
-
-
-#ref should be .755 for women; 2.63 for men 
-model_FULL_HB<- with(summ_covar_FULL_HB$summary, frac_poly_summ_mrRV(bx=bx, #can see the problem occurs here -> powers are 1 and 1
-                  by=by, 
-                  bxse=bxse, 
-                  byse=byse, 
-                  ref=.755,
-                  xmean=xmean,
-                  family="gaussian",
-                  pref_y = "Relative HbA1C, mmol/mol",
-                  fig=TRUE)
-) 
-
-sumMO<- summary(model_FULL_HB) #+ scale_x_continuous(breaks=seq(0,60,5))
-max(model_FULL_HB[["figure"]][["data"]][["x"]]) #ahh ok can see here for female that the max x for the figure is 40.53 -> not sure why it only generated up to here -> ahh ok can see that what's happened is it takes the xmean from highest stratum
-sumMO[["figure"]]+ scale_x_continuous(breaks=seq(0,60,5))
-#hmm something's going wrong when try to apply my fp function above -> telling me the powers are 1 and 1 (X1 and X1.1) -> same for both female and male version
-#hmm doing same thing when use the original frac_poly function too -> GOING TO LEAVE THIS FOR NOW AND HOPE IT FIXES BY THE TIME GET BACK TO IT
-#update 17.05 -> is now working for males only (now matching original stats)! but same prob for females
-```
-
-
-
-
-Cox observational with spline term
+Cox observational T2D analysis 
 ```{r}
 
 
@@ -530,10 +337,8 @@ detach(COX_update79_noEx)
 ```
 
 
+Survival analysis NLMR
 ```{r}
-detach(package:SUMnlmr, unload = TRUE)
-devtools::install_github("amymariemason/SUMnlmr") #reinstalling so can get latest version with cox option
-library(SUMnlmr)
 
 COX_update79_noEx<-COX_update79 %>% filter(BL_drinker_status=="Never"|BL_drinker_status=="Current")
 #and with current drinkers only
@@ -550,16 +355,14 @@ summ_covar_FULL_T2D_COX<-SUMnlmr::create_nlmr_summary(
                                  covar=cbind(dummies_2,dummies_3,matrix(data=c(COX_update79$Age.at.recruitment, COX_update79$Genetic.principal.components...Array.1,COX_update79$Genetic.principal.components...Array.2,COX_update79$Genetic.principal.components...Array.3,COX_update79$Genetic.principal.components...Array.4,COX_update79$Genetic.principal.components...Array.5,COX_update79$Genetic.principal.components...Array.6,COX_update79$Genetic.principal.components...Array.7,COX_update79$Genetic.principal.components...Array.8,COX_update79$Genetic.principal.components...Array.9,COX_update79$Genetic.principal.components...Array.10),ncol=11)),
                                  family = "coxph",
                                  q = 10, strata_method="ranked", controlsonly = FALSE) 
-library(metafor)
-library(stats)
-library(matrixStats)
-  model_DR_COX<- with(summ_covar_FULL_T2D_COX$summary, frac_poly_summ_mrRV(bx=bx,
+
+  model_DR_COX<- with(summ_covar_FULL_T2D_COX$summary, frac_poly_summ_mr(bx=bx,
                   by=by, 
                   bxse=bxse, 
                   byse=byse,
                   ref=1.34,
                   xmean=xmean,
-                  family="cox",
+                  family="cox", pref_x = "Drinks per week",pref_y = "T2D", 
                   fig=TRUE,  ylim_lower = .45, ylim_upper = 4.2, breaks= c(0.5,1,2,3))
 )
 summary(model_DR_COX)
@@ -572,22 +375,15 @@ which.min(xyvals$yvals)
 xyvals[6358,]
 
 
-model_DR_COX <-with(summ_covar_FULL_T2D_COX$summary, SUMnlmr::piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
-                  ci="bootstrap_se",
-                  nboot=1000, 
-                  fig=TRUE,
-                  ref=0,
-                  family="cox",
-                  ci_fig="ribbon")
-)
-summary(model_DR_COX)
-LACESUM<-summary(model_DR_COX)
 
-model_DR_COX <-with(summ_covar_FULL_T2D_COX$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
+model_DR_COX <-with(summ_covar_FULL_T2D_COX$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
                   ci="bootstrap_se",
                   nboot=1000, 
                   fig=TRUE,
-                  ref=1,
+                  ref=1, pref_x = "Drinks per week",
+                                pref_x_ref = "Drinks per week",
+                                                                pref_y = " T2D",
+                                breaks = c(0,1,2,5,10,20,50,100,200,500),
                   family="cox",
                   ci_fig="ribbon")
 )
@@ -595,21 +391,20 @@ summary(model_DR_COX)
 
 
 
-library(tidyverse)
-COX_update79 %>% count(Sex)
-library(survival) 
+
+
 COX_update79_noEx<-COX_update79 %>% filter(BL_drinker_status=="Current")
 COX_update79_M<-COX_update79 %>% filter(Sex=="Male")
 COX_update79_F<-COX_update79 %>% filter(Sex=="Female")
 
-
+#BMI stratification
 str_sort(names(COX_update79))
 COX_update79_F_N<-COX_update79_F %>% filter(Body.mass.index..BMI....Instance.0.participant...p21001_i0.<25) 
 COX_update79_F_OV<-COX_update79_F %>% filter(Body.mass.index..BMI....Instance.0.participant...p21001_i0.>=25
                                              &Body.mass.index..BMI....Instance.0.participant...p21001_i0.<30) 
 COX_update79_F_OB<-COX_update79_F %>% filter(Body.mass.index..BMI....Instance.0.participant...p21001_i0.>30) 
 
-# residual BMI instead
+#BMI instead
 COX_update79_F<-COX_update79_F %>% filter(!is.na(Body.mass.index..BMI....Instance.0.participant...p21001_i0.))
 HBREG<-lm(Body.mass.index..BMI....Instance.0.participant...p21001_i0.~GRS_79, data=COX_update79_F )
 COX_update79_F$value_lm <- HBREG$fitted.values
@@ -626,6 +421,7 @@ COX_update79_noEx_F<-COX_update79_noEx %>% filter(Sex=="Female")
 
   dummies_3<-model.matrix(~array_type, data=COX_update79_F_OB)[,2] 
 
+#run the below for each BMI category separately, and separately for both regular BMI and residual BMI methods of categorisation  
 summ_covar_noEx_FULL_T2D_COX<-SUMnlmr::create_nlmr_summary(
                                          y=COX_update79_F_OB$survobj,
                                  x = COX_update79_F_OB$weekly_units_B_R, 
@@ -634,11 +430,14 @@ summ_covar_noEx_FULL_T2D_COX<-SUMnlmr::create_nlmr_summary(
                                  family = "coxph",
                                  q = 10, strata_method="ranked", controlsonly = FALSE) 
 
-  model_DR_COX<- with(summ_covar_noEx_FULL_T2D_COX$summary, frac_poly_summ_mrRV(bx=bx,
+#change reference value as needed
+  model_DR_COX<- with(summ_covar_noEx_FULL_T2D_COX$summary, frac_poly_summ_mr(bx=bx,
                   by=by, 
                   bxse=bxse, 
                   byse=byse,
                   ref=.439,
+                  pref_x = "Drinks per week",  
+                                pref_y = "T2D", 
                   xmean=xmean,
                   family="cox",
                   fig=TRUE,ylim_lower = .19, ylim_upper = 1.5, breaks= c(0.2,.5,1, 1.5)  )) 
@@ -648,11 +447,16 @@ model_DR_COX
 summary(model_DR_COX)
 
 
-model_DR_COX <-with(summ_covar_noEx_MULL_T2D_COX$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
+model_DR_COX <-with(summ_covar_noEx_FULL_T2D_COX$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
                   ci="bootstrap_se",
                   nboot=1000, 
                   fig=TRUE,
                   ref=0,
+                  ref = mean(xmean),
+                                pref_x = "Drinks per week",
+                                pref_x_ref = "Drinks per week",
+                                                               pref_y = " T2D",
+                                breaks = c(0,1,2,5,10,20,50,100,200,500),
                   family="cox",
                   ci_fig="ribbon")
 )
@@ -664,7 +468,6 @@ str_sort(names(COX_update79)) #"Source.of.report.of.E11..non.insulin.dependent.d
 temp<-COX_update79 %>% select(ID_1,"Source.of.report.of.E11..non.insulin.dependent.diabetes.mellitus." )
 COX_update79<-COX_update79 %>% mutate(source_T2D=Source.of.report.of.E11..non.insulin.dependent.diabetes.mellitus.)
 COX_update79 %>% dplyr::count(source_T2D) #vast majority of T2D diags are from hospital admissions
-
 
 #now remove those diagnosed through primary care only and primary care and other source(s)
 COX_update79<-COX_update79 %>% filter(source_T2D!="Primary care only")
@@ -682,11 +485,13 @@ summ_covar_FULL_T2D_COX<-SUMnlmr::create_nlmr_summary(
                                  q = 10, strata_method="ranked", controlsonly = FALSE) 
 
 
-  model_DR_COX<- with(summ_covar_FULL_T2D_COX$summary, frac_poly_summ_mrRV(bx=bx,
+  model_DR_COX<- with(summ_covar_FULL_T2D_COX$summary, frac_poly_summ_mr(bx=bx,
                   by=by, 
                   bxse=bxse, 
                   byse=byse,
                   ref=1.36,
+                      pref_x = "Drinks per week", 
+                                pref_y = "T2D", 
                   xmean=xmean,
                   family="cox",
                   fig=TRUE
@@ -702,11 +507,15 @@ xyvals<-data.frame(xvals,yvals,uci, lci)
 which.min(xyvals$yvals)
 xyvals[6766,]
 
-model_DR_COX <-with(summ_covar_FULL_T2D_COX$summary, piecewise_summ_mrRV(by, bx, byse, bxse, xmean, xmin,xmax, 
+model_DR_COX <-with(summ_covar_FULL_T2D_COX$summary, piecewise_summ_mr(by, bx, byse, bxse, xmean, xmin,xmax, 
                   ci="bootstrap_se",
                   nboot=1000, 
                   fig=TRUE,
                   ref=0,
+                  pref_x = "Drinks per week",
+                                pref_x_ref = "Drinks per week",
+                                                                pref_y = " T2D",
+                                breaks = c(0,1,2,5,10,20,50,100,200,500),
                   family="cox",
                   ci_fig="ribbon")
 )
